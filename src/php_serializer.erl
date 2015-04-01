@@ -49,7 +49,9 @@ unserialize(<<"b:", Rest/binary>>) ->
 unserialize(<<"i:", Value/binary>>) ->
     binary_to_integer(clean_binary(Value));
 unserialize(<<"d:", Value/binary>>) ->
-    binary_to_float(Value);
+    binary_to_float(clean_binary(Value));
+unserialize(<<"N;">>) ->
+    null;
 unserialize(<<"N">>) ->
     null;
 unserialize(<<"s:", Rest/binary>>) ->
@@ -181,6 +183,10 @@ serialize_test() ->
     Result = serialize(BigList),
     ?assertEqual(Expected, Result).
 
-
+combined_test_() ->
+    List = [<<"a">>, 1, 1.0, null, []],
+    Proplist = lists:zip(lists:seq(0, length(List) - 1), List),
+    Values = [<<"a">>, 1, 1.0, null, [], Proplist],
+    [?_assertEqual(Value, unserialize(serialize(Value))) || Value <- Values].
 
 -endif.
