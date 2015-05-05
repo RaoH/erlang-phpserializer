@@ -58,8 +58,9 @@ unserialize(<<"s:", Rest/binary>>) ->
     case re:run(Rest, <<"^\\d+:">>) of
         {match, [{_Pos, Length}]} ->
             {_, Bin} = split_binary(Rest, Length),
-            Bin1 = binary:replace(Bin, <<"\"">>, <<>>, [global]),
-            clean_binary(Bin1)
+            Bin1 = re:replace(Bin, <<"^\"">>, <<>>, [{return, binary}]),
+            Bin2 = re:replace(Bin1, <<"(\";)|(\")$">>, <<>>, [{return, binary}]),
+            clean_binary(Bin2)
     end;
 unserialize(<<"O:", _Value/binary>>) ->
     %% Not handled as of yet.
@@ -188,5 +189,12 @@ combined_test_() ->
     Proplist = lists:zip(lists:seq(0, length(List) - 1), List),
     Values = [<<"a">>, 1, 1.0, null, [], Proplist],
     [?_assertEqual(Value, unserialize(serialize(Value))) || Value <- Values].
+
+encode_string_with_quotes_test() ->
+    TestVar = [{<<"secret">>, <<"Foo \"bar\"">>}],
+    Result = serialize(TestVar),
+    Result2 = unserialize(Result),
+    ?assertEqual(TestVar, Result2),
+    ok.
 
 -endif.
