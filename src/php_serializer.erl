@@ -35,7 +35,7 @@ escape_binary(Bin) ->
     <<"\"", Bin/binary, "\"">>.
 
 unserialize(<<"a:", Rest/binary>>) ->
-    case re:run(Rest, <<"\\d:{">>) of
+    case re:run(Rest, <<"\\d+:{">>) of
         {match, [{_Pos, Length}]} ->
             {_, Rest1} = split_binary(Rest, Length),
             unserialize(Rest1, [])
@@ -195,6 +195,12 @@ encode_string_with_quotes_test() ->
     Result = serialize(TestVar),
     Result2 = unserialize(Result),
     ?assertEqual(TestVar, Result2),
+    ok.
+
+encode_large_lists_test() ->
+    List = lists:zip(lists:seq(0, 11), lists:seq(0, 11)),
+    Unpacked = unserialize(serialize(List)),
+    ?assertEqual(List, Unpacked),
     ok.
 
 -endif.
