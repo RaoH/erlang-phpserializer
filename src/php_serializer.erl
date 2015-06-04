@@ -11,7 +11,7 @@ serialize(Item) when is_binary(Item)->
     Length = length(List),
     <<"s:", (integer_to_binary(Length))/binary, ":", (escape_binary(Item))/binary, ";">>;
 serialize(Item) when is_float(Item)->
-    <<"d:", (float_to_binary(Item))/binary, ";">>;
+    <<"d:", (float_to_binary(Item, [{decimals, 17}, compact]))/binary, ";">>;
 serialize(Item) when is_integer(Item)->
     <<"i:", (integer_to_binary(Item))/binary, ";">>;
 serialize(null) ->
@@ -156,7 +156,7 @@ unserialize_test() ->
 
 serialize_test() ->
     ?assertEqual(<<"s:6:\"Foobar\";">>, serialize(<<"Foobar">>)),
-    ?assertEqual(<<"d:1.00000999999999997669e+01;">>, serialize(10.0001)),
+    ?assertEqual(<<"d:10.00009999999999976;">>, serialize(10.0001)),
     ?assertEqual(<<"N;">>, serialize(null)),
     ?assertEqual(<<"b:1;">>, serialize(true)),
     ?assertEqual(<<"b:0;">>, serialize(false)),
