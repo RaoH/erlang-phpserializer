@@ -30,92 +30,73 @@ serialize([{Key, Value} | List], Acc) ->
 serialize([], Acc) ->
     <<Acc/binary, "}">>.
 
-
 escape_binary(Bin) ->
     <<"\"", Bin/binary, "\"">>.
 
-unserialize(<<"a:", Rest/binary>>) ->
-    case re:run(Rest, <<"\\d+:{">>) of
-        {match, [{_Pos, Length}]} ->
-            {_, Rest1} = split_binary(Rest, Length),
-            unserialize(Rest1, [])
-    end;
-unserialize(<<"b:", Rest/binary>>) ->
-    Boolean = binary:replace(Rest, <<";">>, <<>>),
-    case clean_binary(Boolean) of
-        <<"1">> -> true;
-        <<"0">> -> false
-    end;
-unserialize(<<"i:", Value/binary>>) ->
-    binary_to_integer(clean_binary(Value));
-unserialize(<<"d:", Value/binary>>) ->
-    binary_to_float(clean_binary(Value));
-unserialize(<<"N;">>) ->
-    null;
-unserialize(<<"N">>) ->
-    null;
-unserialize(<<"s:", Rest/binary>>) ->
-    case re:run(Rest, <<"^\\d+:">>) of
-        {match, [{_Pos, Length}]} ->
-            {_, Bin} = split_binary(Rest, Length),
-            Bin1 = re:replace(Bin, <<"^\"">>, <<>>, [{return, binary}]),
-            Bin2 = re:replace(Bin1, <<"(\";)|(\")$">>, <<>>, [{return, binary}]),
-            clean_binary(Bin2)
-    end;
-unserialize(<<"O:", _Value/binary>>) ->
-    %% Not handled as of yet.
-    <<>>;
-unserialize(<<>>) ->
-    <<>>.
-
-%% Private
-unserialize(<<>>, Acc) ->
-    make_proplist(lists:reverse(Acc), []);
-unserialize(<<"a:", _Rest/binary>> = ArrayElement, Acc) ->
-    case re:run(ArrayElement, <<"^a:\\d:{[^}]*}+">>) of
-        {match, [{_Pos, PatternLength}]} ->
-            {Array, Rest1} = split_binary(ArrayElement, PatternLength),
-            Values = unserialize(Array),
-            Acc1 = [Values | Acc],
-            unserialize(Rest1, Acc1)
-    end;
-unserialize(ArrayElements, Acc) ->
-    Rest = re:replace(ArrayElements, <<"^}*">>, <<>>, [{return, binary}]),
-    [Element, Rest2] = case Rest of
-        <<>> -> [<<>>, <<>>];
-        _       -> binary:split(Rest, <<";">>)
-    end,
-    Value = unserialize(Element),
-    Acc1 = case Value of
-        <<>> -> Acc;
-        _    -> [Value | Acc]
-    end,
-    case Rest2 of
-        <<>> ->
-            make_proplist(lists:reverse(Acc1), []);
-        _ ->
-            unserialize(Rest2, Acc1)
+unserialize(Value) ->
+    case unserialize(Value, []) of
+        {[Result], []} -> Result;
+        Result -> Result
     end.
 
-%% Remove trailing ;
-clean_binary(Value) when is_binary(Value) ->
-    binary:replace(Value, <<"\;">>, <<>>, [global]).
+unserialize(<<"a:", Rest/binary>>, Acc) ->
+    case re:split(Rest, <<"^(\\d+):{">>) of
+        [_, ArrayLengthBin, Rest1] ->
+            ArrayLength = binary_to_integer(ArrayLengthBin),
+            case unserialize(Rest1, []) of
+                {error, Reason} ->
+                    {error, Reason};
+                {ArrayElements, _} when length(ArrayElements) / 2 /= ArrayLength ->
+                    {error, "Invalid items length in array"};
+                {ArrayElements, Rest2} ->
+                    unserialize(Rest2, [make_pairs(lists:reverse(ArrayElements), []) | Acc])
+            end
+    end;
+unserialize(<<"}", Rest/binary>>, Acc) ->
+    {Acc, Rest};
+unserialize(<<"s:", Rest/binary>>, Acc) ->
+    case re:split(Rest, <<"^(\\d+):">>) of
+        [_, BinStringLength, Rest1] ->
+            case re:split(Rest1, <<"^\"(.{", BinStringLength/binary, "})\";">>) of
+                [_, String, Rest2] ->
+                    unserialize(Rest2, [String | Acc])
+            end
+    end;
+unserialize(<<"b:", Rest/binary>>, Acc) ->
+    {BinValue, Rest1} = split_binary(Rest, 2),
+    Value = case BinValue of
+        <<"1;">> -> true;
+        <<"0;">> -> false
+    end,
+    unserialize(Rest1, [Value | Acc]);
+unserialize(<<"i:", Rest/binary>>, Acc) ->
+    case re:split(Rest, <<"^(\\d+);">>) of
+        [_, BinaryInteger, Rest1] ->
+            unserialize(Rest1, [binary_to_integer(BinaryInteger) | Acc])
+    end;
+unserialize(<<"d:", Rest/binary>>, Acc) ->
+    case re:split(Rest, <<"^(\\d+(?:\.\\d+|));">>) of
+        [_, BinaryDecimal, Rest1] ->
+            unserialize(Rest1, [binary_to_float(BinaryDecimal) | Acc])
+    end;
+unserialize(<<"N;", Rest/binary>>, Acc) ->
+    unserialize(Rest, [null | Acc]);
+unserialize(<<"O:", _Rest/binary>>, _Acc) ->
+    {error, "Unserializing classes not implemented"};
+unserialize(<<>>, Acc) ->
+    {Acc, []}.
 
-make_proplist([K, V | T] = List, Acc) when List > 1; is_integer(V); is_binary(V); is_atom(V) ->
-    make_proplist(T, [{K, V} | Acc]);
-make_proplist(List, Acc) when List == 1 ->
-    lists:reverse([List | Acc]);
-make_proplist([K, V | T], Acc) when is_list(V) ->
-    make_proplist(T, [{K, make_proplist(V, [])} | Acc]);
-make_proplist([], Acc) ->
+make_pairs([K, V | T], Acc) ->
+    make_pairs(T, [{K, V} | Acc]);
+make_pairs([], Acc) ->
     lists:reverse(Acc).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 unserialize_test() ->
     ?assertEqual(455, unserialize(<<"i:455;">>)),
-    ?assertEqual(<<"455">>, unserialize(<<"s:3:455;">>)),
-    ?assertEqual(<<"foo">>, unserialize(<<"s:3:foo;">>)),
+    ?assertEqual(<<"0123456789">>, unserialize(<<"s:10:\"0123456789\";">>)),
+    ?assertEqual(<<"foo">>, unserialize(<<"s:3:\"foo\";">>)),
     ?assertEqual(true, unserialize(<<"b:1;">>)),
     ?assertEqual(false, unserialize(<<"b:0;">>)),
     ?assertEqual([{0, <<"foo">>}], unserialize(<<"a:1:{i:0;s:3:\"foo\";}">>)),
@@ -130,6 +111,8 @@ unserialize_test() ->
         unserialize(<<"a:3:{s:6:\"barfoo\";a:3:{i:0;s:6:\"foobar\";i:1;i:1234;i:2;b:0;}",
                       "i:0;i:11234;s:3:\"bar\";s:3:\"foo\";}">>)
     ),
+    ?assertEqual({error, "Unserializing classes not implemented"}, unserialize(<<"O:3:\"foo\":0:{}">>)),
+    ?assertEqual({error, "Invalid items length in array"}, unserialize(<<"a:10:{i:32;}">>)),
     BigString = <<"a:7:{s:3:\"eid\";i:12345;s:6:\"secret\";s:15:\"abcdefgjijklmno\";s:8:\"testmode\"",
                    ";N;s:15:\"ordercost_range\";a:2:{s:4:\"mode\";s:3:\"all\";s:9:\"intervals\";a:1:",
                    "{i:14;a:2:{s:3:\"min\";N;s:3:\"max\";N;}}}s:21:\"disable_deliv_address\";b:0;s:",
@@ -201,6 +184,28 @@ encode_large_lists_test() ->
     List = lists:zip(lists:seq(0, 11), lists:seq(0, 11)),
     Unpacked = unserialize(serialize(List)),
     ?assertEqual(List, Unpacked),
+    ok.
+
+encode_complex_structure_test() ->
+    List = [{<<"a">>, [
+                {<<"aa">>, [
+                    {<<"aaa">>, [
+                        {<<"aaaa">>, 1}
+                    ]}
+                ]},
+                {<<"ab">>, [
+                    {<<"abb">>, [
+                        {<<"abbb">>, 1},
+                        {<<"abbb2">>, 2}
+                    ]},
+                    {<<"abb2">>, [
+                        {<<"abb2b">>, 1}
+                    ]}
+                ]}
+             ]}
+           ],
+    Recoded = unserialize(serialize(List)),
+    ?assertEqual(List, Recoded),
     ok.
 
 -endif.
