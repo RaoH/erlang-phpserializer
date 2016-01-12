@@ -1,6 +1,6 @@
 {application, php_serializer, [
     {description, "An Erlang php un/serializer library"},
-    {vsn, "0.0.1"},
+    {vsn, "0.1.0"},
     {modules, [php_serialzizer]},
     {registered, []},
     {applications, [
